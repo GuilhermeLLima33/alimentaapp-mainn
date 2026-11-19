@@ -1,0 +1,857 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function administrador() {
+      return logado()
+        && request.auth.token.admin == true;
+    }
+
+    function transicaoStatusCampanhaValida(statusAnterior, statusNovo) {
+      return statusAnterior == statusNovo
+        || (
+          statusAnterior == "Ativa"
+          && statusNovo in ["Pausada", "Encerrada"]
+        )
+        || (
+          statusAnterior == "Pausada"
+          && statusNovo in ["Ativa", "Encerrada"]
+        );
+    }
+
+    // ===================================
+    // VALIDAR CAMPANHAS
+    // ===================================
+
+    function campanhaValida(d) {
+      return d.keys().hasOnly([
+        "nome", "descricao", "categoria",
+        "inicio", "termino", "meta",
+        "status", "imagemChave", "exemplo",
+        "imagemUrl", "imagemPath",
+        "criadoPor", "criadoEm", "atualizadoEm"
+      ])
+      && d.keys().hasAll([
+        "nome", "descricao", "categoria",
+        "inicio", "termino", "meta",
+        "status", "imagemChave", "exemplo",
+        "criadoPor", "criadoEm", "atualizadoEm"
+      ])
+      && d.nome is string
+      && d.nome.size() >= 3
+      && d.nome.size() <= 100
+      && d.descricao is string
+      && d.descricao.size() >= 10
+      && d.descricao.size() <= 500
+      && d.categoria in [
+        "Alimentos", "Cestas básicas",
+        "Escolas", "Institucional",
+        "Emergencial"
+      ]
+      && d.inicio is string
+      && d.inicio.size() == 10
+      && d.termino is string
+      && d.termino.size() == 10
+      && d.meta is number
+      && d.meta >= 0
+      && d.meta <= 100000000
+      && d.status in [
+        "Ativa", "Pausada", "Encerrada"
+      ]
+      && (
+        d.imagemChave == null
+        || d.imagemChave in [
+          "cesta", "arroz", "leite",
+          "alface", "cafe"
+        ]
+      )
+      && (
+        !d.keys().hasAny(["imagemUrl"])
+        || d.imagemUrl == null
+        || (
+          d.imagemUrl is string
+          && d.imagemUrl.size() <= 2048
+        )
+      )
+      && (
+        !d.keys().hasAny(["imagemPath"])
+        || d.imagemPath == null
+        || (
+          d.imagemPath is string
+          && d.imagemPath.size() <= 300
+        )
+      )
+      && d.exemplo == false
+      && d.criadoPor is string
+      && d.criadoEm is timestamp
+      && d.atualizadoEm is timestamp;
+    }
+
+    // ===================================
+    // VALIDAR ALIMENTOS
+    // ===================================
+
+    function valido(d) {
+      return d.keys().hasOnly([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAtual", "precoAntigo",
+        "precoReferencia", "precoUnidade",
+        "imagemChave", "status", "demonstracao",
+        "criadoPor", "criadoEm", "atualizadoEm"
+      ])
+      && d.keys().hasAll([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAntigo", "precoReferencia",
+        "precoUnidade", "imagemChave", "status",
+        "demonstracao", "criadoPor", "criadoEm"
+      ])
+      && d.nome is string
+      && d.nome.size() >= 3
+      && d.nome.size() <= 100
+      && d.estabelecimento is string
+      && d.estabelecimento.size() >= 1
+      && d.estabelecimento.size() <= 100
+      && d.categoria in [
+        "Hortifruti", "Padarias", "Refeições",
+        "Bebidas", "Mercearia", "Outros"
+      ]
+      && d.quantidade is number
+      && d.quantidade > 0
+      && d.quantidade <= 10000
+      && d.unidade in [
+        "unidades", "kg", "cestas",
+        "pacotes", "litros"
+      ]
+      && d.cidade is string
+      && d.cidade.size() >= 1
+      && d.cidade.size() <= 100
+      && d.descricao is string
+      && d.descricao.size() <= 300
+      && d.validade is string
+      && d.validade.size() <= 10
+      && d.preco is string
+      && d.preco.size() <= 30
+      && (
+        !d.keys().hasAny(["precoAtual"])
+        || (
+          d.precoAtual is number
+          && d.precoAtual >= 0
+        )
+      )
+      && d.precoAntigo is string
+      && d.precoAntigo.size() <= 30
+      && (
+        d.precoReferencia == null
+        || (
+          d.precoReferencia is number
+          && d.precoReferencia >= 0
+        )
+      )
+      && d.precoUnidade is string
+      && d.precoUnidade.size() <= 40
+      && d.imagemChave is string
+      && d.imagemChave.size() <= 30
+      && d.status == "disponivel"
+      && d.demonstracao is bool
+      && d.criadoPor == request.auth.uid
+      && d.criadoEm is timestamp
+      && d.criadoEm == request.time;
+    }
+
+    function produtoAdminValido(d, criador) {
+      return d.keys().hasOnly([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAtual", "precoAntigo",
+        "precoReferencia", "precoUnidade",
+        "imagemChave", "imagemUrl", "status",
+        "demonstracao", "adminCadastrado",
+        "imagemAdminDefinida",
+        "criadoPor", "criadoEm", "atualizadoEm",
+        "ultimaDoacaoId"
+      ])
+      && d.keys().hasAll([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAtual", "precoAntigo",
+        "precoReferencia", "precoUnidade",
+        "imagemChave", "imagemUrl", "status",
+        "demonstracao", "adminCadastrado",
+        "imagemAdminDefinida",
+        "criadoPor", "criadoEm", "atualizadoEm"
+      ])
+      && d.nome is string
+      && d.nome.size() >= 3
+      && d.nome.size() <= 100
+      && d.estabelecimento is string
+      && d.estabelecimento.size() >= 1
+      && d.estabelecimento.size() <= 100
+      && d.categoria in [
+        "Hortifruti", "Padarias", "Refeições",
+        "Bebidas", "Mercearia", "Outros"
+      ]
+      && d.quantidade is number
+      && d.quantidade >= 0
+      && d.quantidade <= 10000
+      && d.unidade in [
+        "unidades", "kg", "cestas",
+        "pacotes", "litros"
+      ]
+      && d.cidade is string
+      && d.cidade.size() >= 1
+      && d.cidade.size() <= 100
+      && d.descricao is string
+      && d.descricao.size() >= 5
+      && d.descricao.size() <= 300
+      && d.validade is string
+      && d.validade.size() <= 10
+      && d.preco is string
+      && d.preco.size() <= 30
+      && d.precoAtual is number
+      && d.precoAtual > 0
+      && d.precoAtual <= 100000000
+      && d.precoAntigo is string
+      && d.precoAntigo.size() <= 30
+      && d.precoReferencia is number
+      && d.precoReferencia > 0
+      && d.precoUnidade is string
+      && d.precoUnidade.size() <= 40
+      && d.imagemChave is string
+      && d.imagemChave.size() <= 30
+      && d.imagemUrl is string
+      && d.imagemUrl.size() <= 2048
+      && (
+        d.imagemUrl == ""
+        || d.imagemUrl.matches("https://.+")
+      )
+      && d.status in ["disponivel", "indisponivel", "esgotado"]
+      && (
+        (d.quantidade == 0 && d.status == "esgotado")
+        || (
+          d.quantidade > 0
+          && d.status in ["disponivel", "indisponivel"]
+        )
+      )
+      && d.demonstracao is bool
+      && d.adminCadastrado == true
+      && d.imagemAdminDefinida is bool
+      && d.imagemAdminDefinida == (d.imagemUrl != "")
+      && d.criadoPor == criador
+      && d.criadoEm is timestamp
+      && d.atualizadoEm == request.time
+      && (
+        !d.keys().hasAny(["ultimaDoacaoId"])
+        || (
+          d.ultimaDoacaoId is string
+          && d.ultimaDoacaoId.size() <= 150
+        )
+      );
+    }
+
+    function produtoAdminEdicaoValida(d, anterior) {
+      let alterados = d.diff(anterior).affectedKeys();
+      return alterados.hasOnly([
+        "nome", "categoria", "quantidade", "unidade",
+        "descricao", "preco", "precoAtual",
+        "precoReferencia", "precoUnidade",
+        "imagemChave", "imagemUrl", "imagemAdminDefinida",
+        "adminCadastrado", "status", "atualizadoEm",
+        "imagem", "image", "imageUrl", "foto", "fotoUrl",
+        "fotoURL", "photoUrl", "photoURL", "urlImagem", "urlFoto"
+      ])
+      && d.adminCadastrado == true
+      && d.atualizadoEm == request.time
+      && (
+        !alterados.hasAny(["nome"])
+        || (
+          d.nome is string
+          && d.nome.size() >= 3
+          && d.nome.size() <= 100
+        )
+      )
+      && (
+        !alterados.hasAny(["categoria"])
+        || d.categoria in [
+          "Hortifruti", "Padarias", "Refeições",
+          "Bebidas", "Mercearia", "Outros"
+        ]
+      )
+      && (
+        !alterados.hasAny(["quantidade"])
+        || (
+          d.quantidade is number
+          && d.quantidade >= 0
+          && d.quantidade <= 10000
+        )
+      )
+      && (
+        !alterados.hasAny(["unidade"])
+        || d.unidade in [
+          "unidades", "kg", "cestas", "pacotes", "litros"
+        ]
+      )
+      && (
+        !alterados.hasAny(["descricao"])
+        || (
+          d.descricao is string
+          && d.descricao.size() >= 5
+          && d.descricao.size() <= 300
+        )
+      )
+      && (
+        !alterados.hasAny(["preco"])
+        || (
+          d.preco is string
+          && d.preco.size() <= 30
+        )
+      )
+      && (
+        !alterados.hasAny(["precoAtual"])
+        || (
+          d.precoAtual is number
+          && d.precoAtual > 0
+          && d.precoAtual <= 100000000
+        )
+      )
+      && (
+        !alterados.hasAny(["precoReferencia"])
+        || (
+          d.precoReferencia is number
+          && d.precoReferencia > 0
+          && d.precoReferencia <= 100000000
+        )
+      )
+      && (
+        !alterados.hasAny(["precoUnidade"])
+        || (
+          d.precoUnidade is string
+          && d.precoUnidade.size() <= 40
+        )
+      )
+      && (
+        !alterados.hasAny(["imagemChave"])
+        || (
+          d.imagemChave is string
+          && d.imagemChave.size() <= 30
+        )
+      )
+      && d.imagemUrl is string
+      && d.imagemUrl.size() <= 2048
+      && (
+        d.imagemUrl == ""
+        || d.imagemUrl.matches("https://.+")
+      )
+      && d.imagemAdminDefinida is bool
+      && d.imagemAdminDefinida == (d.imagemUrl != "")
+      && (
+        !alterados.hasAny(["quantidade"])
+        || (
+          (d.quantidade == 0 && d.status == "esgotado")
+          || (
+            d.quantidade > 0
+            && d.status in ["disponivel", "indisponivel"]
+          )
+        )
+      )
+      && (
+        !alterados.hasAny(["status"])
+        || d.status in ["disponivel", "indisponivel", "esgotado"]
+      );
+    }
+
+    // ===================================
+    // VALIDAR MINHAS DOAÇÕES
+    // ===================================
+
+    function validaMinhaDoacao(d) {
+      return d.keys().hasOnly([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAtual", "precoAntigo",
+        "precoReferencia", "precoUnidade",
+        "imagemChave", "status", "demonstracao",
+        "pagamentoStatus",
+        "formaPagamento", "totalSimuladoCentavos",
+        "parcelas", "valorParcelaCentavos",
+        "ultimaParcelaCentavos", "jurosPercentual",
+        "criadoPor", "criadoEm", "tipoDoacao",
+        "quantidadeItens", "itens",
+        "quantidadesPorProduto", "total",
+        "campanhaId",
+        "atualizadoEm"
+      ])
+      && d.keys().hasAll([
+        "nome", "estabelecimento", "categoria",
+        "quantidade", "unidade", "cidade",
+        "descricao", "validade", "preco",
+        "precoAntigo", "precoReferencia",
+        "precoUnidade", "imagemChave", "status",
+        "demonstracao", "pagamentoStatus",
+        "criadoPor", "criadoEm"
+      ])
+      && d.nome is string
+      && d.nome.size() >= 3
+      && d.nome.size() <= 100
+      && d.estabelecimento is string
+      && d.estabelecimento.size() >= 1
+      && d.estabelecimento.size() <= 100
+      && (
+        d.tipoDoacao == "campanha"
+          ? d.categoria is string
+            && d.categoria.size() <= 60
+          : d.categoria in [
+            "Hortifruti", "Padarias", "Refeições",
+            "Bebidas", "Mercearia", "Outros"
+          ]
+      )
+      && d.quantidade is number
+      && d.quantidade > 0
+      && d.quantidade <= 10000
+      && (
+        d.tipoDoacao == "campanha"
+          ? d.unidade == "doação"
+          : d.unidade in [
+            "unidades", "kg", "cestas",
+            "pacotes", "litros", "itens"
+          ]
+      )
+      && d.cidade is string
+      && d.cidade.size() >= 1
+      && d.cidade.size() <= 100
+      && d.descricao is string
+      && d.descricao.size() <= 300
+      && d.validade is string
+      && d.validade.size() <= 10
+      && d.preco is string
+      && d.preco.size() <= 30
+      && (
+        !d.keys().hasAny(["precoAtual"])
+        || (
+          d.precoAtual is number
+          && d.precoAtual >= 0
+        )
+      )
+      && d.precoAntigo is string
+      && d.precoAntigo.size() <= 30
+      && (
+        d.precoReferencia == null
+        || (
+          d.precoReferencia is number
+          && d.precoReferencia >= 0
+        )
+      )
+      && d.precoUnidade is string
+      && d.precoUnidade.size() <= 40
+      && d.imagemChave is string
+      && d.imagemChave.size() <= 30
+      && (
+        !d.keys().hasAny(["formaPagamento"])
+        || d.formaPagamento in ["credito", "debito", "pix"]
+      )
+      && (
+        !d.keys().hasAny(["totalSimuladoCentavos"])
+        || (
+          d.totalSimuladoCentavos is int
+          && d.totalSimuladoCentavos >= 0
+        )
+      )
+      && (
+        !d.keys().hasAny(["parcelas"])
+        || (
+          d.parcelas is int
+          && d.parcelas >= 1
+          && d.parcelas <= 8
+        )
+      )
+      && (
+        !d.keys().hasAny(["valorParcelaCentavos"])
+        || (
+          d.valorParcelaCentavos is int
+          && d.valorParcelaCentavos >= 0
+        )
+      )
+      && (
+        !d.keys().hasAny(["ultimaParcelaCentavos"])
+        || (
+          d.ultimaParcelaCentavos is int
+          && d.ultimaParcelaCentavos >= 0
+        )
+      )
+      && (
+        !d.keys().hasAny(["jurosPercentual"])
+        || (
+          d.jurosPercentual is number
+          && d.jurosPercentual >= 0
+        )
+      )
+      && (
+        (
+          d.status == "Em andamento"
+          && d.pagamentoStatus == "aguardando_pagamento"
+        )
+        || (
+          d.status == "Concluída"
+          && d.pagamentoStatus == "simulacao_concluida"
+          && d.formaPagamento in ["credito", "debito", "pix"]
+          && d.totalSimuladoCentavos is int
+          && d.totalSimuladoCentavos >= 0
+          && (
+            d.formaPagamento != "credito"
+            || (
+              d.parcelas is int
+              && d.valorParcelaCentavos is int
+              && d.ultimaParcelaCentavos is int
+              && d.jurosPercentual is number
+            )
+          )
+        )
+      )
+      && d.demonstracao is bool
+      && d.criadoPor == request.auth.uid
+      && d.criadoEm is timestamp
+      && (
+        !d.keys().hasAny(["atualizadoEm"])
+        || d.atualizadoEm == request.time
+      )
+      && (
+        !d.keys().hasAny(["tipoDoacao"])
+        || (
+          d.tipoDoacao == "agrupada"
+          && d.itens is list
+          && d.itens.size() >= 1
+          && d.itens.size() <= 50
+          && d.total is number
+          && d.total >= 0
+          && d.quantidadeItens is number
+          && d.quantidadeItens == d.itens.size()
+          && d.quantidade == d.quantidadeItens
+          && d.unidade == "itens"
+          && d.quantidadesPorProduto is map
+        )
+        || (
+          d.tipoDoacao == "campanha"
+          && d.keys().hasAll(["campanhaId", "total"])
+          && d.campanhaId is string
+          && d.campanhaId.size() >= 1
+          && d.campanhaId.size() <= 150
+          && d.total is number
+          && d.total > 0
+          && d.quantidade == 1
+          && d.unidade == "doação"
+          && d.precoAtual == d.total
+          && !d.keys().hasAny([
+            "itens", "quantidadeItens", "quantidadesPorProduto"
+          ])
+        )
+      );
+    }
+
+    // ===================================
+    // BAIXAR ESTOQUE
+    // ===================================
+
+    function baixaEstoqueVinculada(alimentoId) {
+      let doacaoRef = /databases/$(database)/documents/minhasDoacoes/$(request.resource.data.ultimaDoacaoId);
+      let doacaoAnterior = get(doacaoRef).data;
+      let doacao = getAfter(doacaoRef).data;
+
+      return request.resource.data.ultimaDoacaoId is string
+        && doacao.tipoDoacao == "agrupada"
+        && doacaoAnterior.status == "Em andamento"
+        && doacaoAnterior.pagamentoStatus
+          == "aguardando_pagamento"
+        && doacao.status == "Concluída"
+        && doacao.pagamentoStatus
+          == "simulacao_concluida"
+        && doacao.criadoPor == request.auth.uid
+        && doacao.atualizadoEm == request.time
+        && doacao.quantidadesPorProduto is map
+        && doacao.quantidadesPorProduto.keys().hasAll([
+          alimentoId
+        ])
+        && doacao.quantidadesPorProduto[alimentoId]
+          == resource.data.quantidade
+            - request.resource.data.quantidade;
+    }
+
+    // ===================================
+    // ALIMENTOS
+    // ===================================
+
+    match /alimentos/{alimentoId} {
+      allow read: if logado();
+
+      allow create: if administrador()
+        && (
+          valido(request.resource.data)
+          || (
+            produtoAdminValido(
+              request.resource.data,
+              request.auth.uid
+            )
+            && request.resource.data.criadoEm == request.time
+          )
+        );
+
+      allow update: if logado()
+        && (
+          (
+            administrador()
+            && resource.data.demonstracao == true
+            && request.resource.data.diff(
+              resource.data
+            ).affectedKeys().hasOnly([
+              "preco", "precoAtual", "precoAntigo",
+              "precoReferencia", "precoUnidade",
+              "atualizadoEm"
+            ])
+            && request.resource.data.preco is string
+            && request.resource.data.preco.size() <= 30
+            && request.resource.data.precoAtual is number
+            && request.resource.data.precoAtual >= 0
+            && request.resource.data.precoAntigo is string
+            && request.resource.data.precoAntigo.size() <= 30
+            && request.resource.data.precoReferencia is number
+            && request.resource.data.precoReferencia >= 0
+            && request.resource.data.precoUnidade is string
+            && request.resource.data.precoUnidade.size() <= 40
+            && request.resource.data.atualizadoEm
+              == request.time
+          )
+          || (
+            administrador()
+            && produtoAdminEdicaoValida(
+              request.resource.data,
+              resource.data
+            )
+          )
+          || (
+            administrador()
+            && request.resource.data.diff(
+              resource.data
+            ).affectedKeys().hasOnly([
+              "status", "atualizadoEm"
+            ])
+            && request.resource.data.status in [
+              "disponivel", "indisponivel"
+            ]
+            && (
+              request.resource.data.status == "indisponivel"
+              || request.resource.data.quantidade > 0
+            )
+            && request.resource.data.atualizadoEm
+              == request.time
+          )
+          || (
+            resource.data.status == "disponivel"
+            && resource.data.quantidade is number
+            && request.resource.data.diff(
+              resource.data
+            ).affectedKeys().hasOnly([
+              "quantidade", "status",
+              "atualizadoEm", "ultimaDoacaoId"
+            ])
+            && request.resource.data.quantidade is number
+            && request.resource.data.quantidade >= 0
+            && request.resource.data.quantidade
+              < resource.data.quantidade
+            && request.resource.data.status
+              == (
+                request.resource.data.quantidade == 0
+                  ? "esgotado"
+                  : "disponivel"
+              )
+            && request.resource.data.atualizadoEm
+              == request.time
+            && baixaEstoqueVinculada(alimentoId)
+          )
+        );
+
+      allow delete: if administrador();
+    }
+
+    // ===================================
+    // CARRINHOS
+    // ===================================
+
+    match /carrinhos/{uid} {
+      allow read: if logado()
+        && request.auth.uid == uid;
+
+      allow create: if logado()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "criadoPor", "criadoEm",
+          "atualizadoEm", "itens"
+        ])
+        && request.resource.data.criadoPor == uid
+        && request.resource.data.criadoEm is timestamp
+        && request.resource.data.atualizadoEm
+          == request.time
+        && request.resource.data.itens is list
+        && request.resource.data.itens.size() <= 50;
+
+      allow update: if logado()
+        && request.auth.uid == uid
+        && resource.data.criadoPor == uid
+        && request.resource.data.keys().hasOnly([
+          "criadoPor", "criadoEm",
+          "atualizadoEm", "itens"
+        ])
+        && request.resource.data.criadoPor == uid
+        && request.resource.data.criadoEm is timestamp
+        && request.resource.data.atualizadoEm
+          == request.time
+        && request.resource.data.itens is list
+        && request.resource.data.itens.size() <= 50;
+
+      allow delete: if false;
+    }
+
+    // ===================================
+    // MINHAS DOAÇÕES
+    // ===================================
+
+    match /minhasDoacoes/{doacaoId} {
+      allow read: if logado()
+        && (
+          administrador()
+          || resource.data.criadoPor == request.auth.uid
+        );
+
+      allow create: if logado()
+        && validaMinhaDoacao(
+          request.resource.data
+        )
+        && request.resource.data.status
+          == "Em andamento"
+        && request.resource.data.pagamentoStatus
+          == "aguardando_pagamento"
+        && !request.resource.data.keys().hasAny([
+          "formaPagamento", "totalSimuladoCentavos",
+          "parcelas", "valorParcelaCentavos",
+          "ultimaParcelaCentavos", "jurosPercentual"
+        ])
+        && request.resource.data.criadoEm
+          == request.time
+        && request.resource.data.atualizadoEm
+          == request.time;
+
+      allow update: if logado()
+        && resource.data.criadoPor
+          == request.auth.uid
+        && validaMinhaDoacao(
+          request.resource.data
+        )
+        && request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            "status", "pagamentoStatus",
+            "atualizadoEm", "formaPagamento",
+            "totalSimuladoCentavos", "parcelas",
+            "valorParcelaCentavos",
+            "ultimaParcelaCentavos", "jurosPercentual"
+          ])
+        && resource.data.status
+          == "Em andamento"
+        && resource.data.pagamentoStatus
+          == "aguardando_pagamento"
+        && request.resource.data.status
+          == "Concluída"
+        && request.resource.data.pagamentoStatus
+          == "simulacao_concluida"
+        && request.resource.data.formaPagamento
+          in ["credito", "debito", "pix"]
+        && request.resource.data.totalSimuladoCentavos is int
+        && request.resource.data.totalSimuladoCentavos >= 0
+        && request.resource.data.criadoPor
+          == resource.data.criadoPor
+        && request.resource.data.criadoEm
+          == resource.data.criadoEm
+        && request.resource.data.atualizadoEm
+          == request.time;
+
+      allow delete: if false;
+    }
+
+    // ===================================
+    // CAMPANHAS ADMINISTRATIVAS
+    // ===================================
+
+    match /campanhas/{campanhaId} {
+      allow read: if logado();
+
+      allow create: if administrador()
+        && campanhaValida(
+          request.resource.data
+        )
+        && request.resource.data.criadoPor
+          == request.auth.uid
+        && request.resource.data.criadoEm
+          == request.time
+        && request.resource.data.atualizadoEm
+          == request.time;
+
+      allow update: if administrador()
+        && campanhaValida(
+          request.resource.data
+        )
+        && transicaoStatusCampanhaValida(
+          resource.data.status,
+          request.resource.data.status
+        )
+        && request.resource.data.criadoPor
+          == resource.data.criadoPor
+        && request.resource.data.criadoEm
+          == resource.data.criadoEm
+        && request.resource.data.atualizadoEm
+          == request.time;
+
+      allow delete: if false;
+    }
+
+    match /perfis/{uid} {
+      allow read: if logado()
+        && request.auth.uid == uid;
+
+      allow create, update: if logado()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "nome", "telefone", "nascimento",
+          "fotoUrl", "atualizadoEm"
+        ])
+        && request.resource.data.keys().hasAll([
+          "nome", "telefone", "nascimento",
+          "fotoUrl", "atualizadoEm"
+        ])
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() >= 2
+        && request.resource.data.nome.size() <= 100
+        && request.resource.data.telefone is string
+        && request.resource.data.telefone.size() <= 20
+        && request.resource.data.nascimento is string
+        && request.resource.data.nascimento.size() <= 10
+        && request.resource.data.fotoUrl is string
+        && request.resource.data.fotoUrl.size() <= 2048
+        && (
+          request.resource.data.fotoUrl == ""
+          || request.resource.data.fotoUrl.matches("https://.+")
+        )
+        && request.resource.data.atualizadoEm == request.time;
+
+      allow delete: if false;
+    }
+  }
+}
